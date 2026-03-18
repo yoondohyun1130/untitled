@@ -768,8 +768,12 @@ tr:hover td{background:rgba(26,26,26,0.7)}
     <div class="modal-header"><div class="modal-title">일정 추가</div><button class="modal-close" onclick="closeModal('eventModal')">✕</button></div>
     <div class="form-group"><label class="form-label">일정 제목 *</label><input class="form-input" id="evtTitle" placeholder="일정 제목"/></div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">날짜 *</label><input class="form-input" id="evtDate" type="date"/></div>
-      <div class="form-group"><label class="form-label">시간</label><input class="form-input" id="evtTime" type="time"/></div>
+      <div class="form-group"><label class="form-label">시작 날짜 *</label><input class="form-input" id="evtDate" type="date" onchange="syncEvtEndDate()"/></div>
+      <div class="form-group"><label class="form-label">종료 날짜</label><input class="form-input" id="evtEndDate" type="date" onchange="validateEvtDates()"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">시작 시간</label><input class="form-input" id="evtTime" type="time"/></div>
+      <div class="form-group"><label class="form-label">종료 시간</label><input class="form-input" id="evtEndTime" type="time"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">유형</label><select class="form-select" id="evtType"><option value="blue">회의</option><option value="green">행사</option><option value="purple">마감</option><option value="warn">휴가</option><option value="pink">개인</option><option value="gray">기타</option></select></div>
@@ -1496,31 +1500,63 @@ function renderCalendar(){
   for(let d=1;d<=days;d++){
     const ds=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday=today.getFullYear()===y&&today.getMonth()===m&&today.getDate()===d;
-    const evts=state.events.filter(e=>e.date===ds);
-    html+=`<div class="cal-cell${isAdmin?' clickable':''}${isToday?' today':''}" ${isAdmin?`onclick="openAddEvent('${ds}')"`:''}><div class="cal-dn">${d}</div>${evts.map(e=>`<div class="cal-ev ${e.type}" onclick="event.stopPropagation();viewEvent(${e.id})">${e.time?e.time+' ':''}${e.title}</div>`).join('')}</div>`;
+    const evts=state.events.filter(e=>{
+      const start=e.date;
+      const end=e.endDate||e.date;
+      return ds>=start&&ds<=end;
+    });
+    const evtHtml=evts.map(e=>{
+      const isMulti=e.endDate&&e.endDate!==e.date;
+      const isStart=e.date===ds;
+      const label=isStart?(e.time?e.time+' ':'')+e.title:'↔ '+e.title;
+      const extra=isMulti?(isStart?'border-radius:4px 0 0 4px;':e.endDate===ds?'border-radius:0 4px 4px 0;':'border-radius:0;'):'';
+      return `<div class="cal-ev ${e.type}" style="${extra}" onclick="event.stopPropagation();viewEvent(${e.id})">${label}</div>`;
+    }).join('');
+    html+=`<div class="cal-cell${isAdmin?' clickable':''}${isToday?' today':''}" ${isAdmin?`onclick="openAddEvent('${ds}')"`:''}><div class="cal-dn">${d}</div>${evtHtml}</div>`;
   }
   document.getElementById('calCells').innerHTML=html;
 }
 function changeMonth(d){state.calMonth+=d;if(state.calMonth>11){state.calMonth=0;state.calYear++;}if(state.calMonth<0){state.calMonth=11;state.calYear--;}renderCalendar();}
 function goToday(){state.calYear=new Date().getFullYear();state.calMonth=new Date().getMonth();renderCalendar();}
-function openAddEvent(date){document.getElementById('evtDate').value=date;openModal('eventModal');}
+function openAddEvent(date){
+  document.getElementById('evtDate').value=date;
+  document.getElementById('evtEndDate').value=date;
+  document.getElementById('evtTime').value='';
+  document.getElementById('evtEndTime').value='';
+  document.getElementById('evtTitle').value='';
+  document.getElementById('evtNote').value='';
+  if(document.getElementById('evtOwner')) document.getElementById('evtOwner').value='';
+  openModal('eventModal');
+}
+function syncEvtEndDate(){
+  const s=document.getElementById('evtDate').value;
+  const e=document.getElementById('evtEndDate');
+  if(!e.value||e.value<s) e.value=s;
+}
+function validateEvtDates(){
+  const s=document.getElementById('evtDate').value;
+  const e=document.getElementById('evtEndDate');
+  if(s&&e.value&&e.value<s) e.value=s;
+}
 function submitEvent(){
   const title=document.getElementById('evtTitle').value.trim();
   const date=document.getElementById('evtDate').value;
-  if(!title||!date){toast('제목과 날짜는 필수입니다','error');return;}
+  if(!title||!date){toast('제목과 시작 날짜는 필수입니다','error');return;}
+  const endDate=document.getElementById('evtEndDate').value||date;
   const isAdmin=currentUser.role==='admin';
-  // 직원은 담당자를 본인 이름으로 고정
   const owner=isAdmin?document.getElementById('evtOwner').value:currentUser.name;
   state.events.push({
     id:Date.now(),title,date,
+    endDate: endDate>=date ? endDate : date,
     time:document.getElementById('evtTime').value,
+    endTime:document.getElementById('evtEndTime').value,
     type:document.getElementById('evtType').value,
     owner,
     ownerId:currentUser.id,
     note:document.getElementById('evtNote').value
   });
   save();closeModal('eventModal');
-  ['evtTitle','evtDate','evtTime','evtOwner','evtNote'].forEach(id=>document.getElementById(id).value='');
+  ['evtTitle','evtDate','evtEndDate','evtTime','evtEndTime','evtOwner','evtNote'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderCalendar();toast('일정이 추가되었습니다','success');
 }
 function viewEvent(id){
@@ -1532,7 +1568,7 @@ function viewEvent(id){
   document.getElementById('evtDetailTitle').textContent=e.title;
   document.getElementById('evtDetailBody').innerHTML=`
     <div style="display:flex;flex-direction:column;gap:12px">
-      <div><div style="font-size:0.7rem;color:var(--text3);margin-bottom:3px">날짜 / 시간</div><div>${e.date}${e.time?' '+e.time:''}</div></div>
+      <div><div style="font-size:0.7rem;color:var(--text3);margin-bottom:3px">날짜 / 시간</div><div>${e.date}${e.time?' '+e.time:''}${(e.endDate&&e.endDate!==e.date)?` ~ ${e.endDate}${e.endTime?' '+e.endTime:''}`:e.endTime?' ~ '+e.endTime:''}</div></div>
       <div><div style="font-size:0.7rem;color:var(--text3);margin-bottom:3px">유형</div><div>${typeLabel[e.type]||e.type}</div></div>
       ${e.owner?`<div><div style="font-size:0.7rem;color:var(--text3);margin-bottom:3px">담당자</div><div>${e.owner}</div></div>`:''}
       ${e.note?`<div><div style="font-size:0.7rem;color:var(--text3);margin-bottom:3px">메모</div><div style="background:var(--surface2);padding:10px;border-radius:6px;font-size:0.85rem">${e.note}</div></div>`:''}
