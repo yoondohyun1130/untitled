@@ -765,7 +765,8 @@ tr:hover td{background:rgba(26,26,26,0.7)}
 
 <div class="modal-overlay" id="eventModal">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">일정 추가</div><button class="modal-close" onclick="closeModal('eventModal')">✕</button></div>
+    <input type="hidden" id="evtEditId"/>
+    <div class="modal-header"><div class="modal-title" id="eventModalTitle">일정 추가</div><button class="modal-close" onclick="closeModal('eventModal')">✕</button></div>
     <div class="form-group"><label class="form-label">일정 제목 *</label><input class="form-input" id="evtTitle" placeholder="일정 제목"/></div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">시작 날짜 *</label><input class="form-input" id="evtDate" type="date" onchange="syncEvtEndDate()"/></div>
@@ -788,7 +789,7 @@ tr:hover td{background:rgba(26,26,26,0.7)}
   <div class="modal" style="max-width:400px">
     <div class="modal-header"><div class="modal-title" id="evtDetailTitle">일정 상세</div><button class="modal-close" onclick="closeModal('evtDetailModal')">✕</button></div>
     <div id="evtDetailBody"></div>
-    <div class="modal-footer"><button class="btn btn-danger btn-sm" id="evtDeleteBtn" style="display:none">삭제</button><button class="btn btn-secondary" onclick="closeModal('evtDetailModal')">닫기</button></div>
+    <div class="modal-footer"><button class="btn btn-danger btn-sm" id="evtDeleteBtn" style="display:none">삭제</button><button class="btn btn-secondary btn-sm" id="evtEditBtn" onclick="openEditEvent()">수정</button><button class="btn btn-secondary" onclick="closeModal('evtDetailModal')">닫기</button></div>
   </div>
 </div>
 
@@ -1149,8 +1150,8 @@ async function doLogin(){
   const pw=document.getElementById('loginPw').value.trim();
   if(!id||!pw){toast('아이디와 비밀번호를 입력하세요','error');return;}
 
-  // 최신 데이터 먼저 로드
-  await load();
+  // 최신 데이터 먼저 로드 (실패해도 로그인 진행)
+  try{ await load(); }catch(e){ console.warn('load 실패, 로그인 계속 진행', e); }
 
   if(loginMode==='admin'){
     if(id==='admin'&&pw==='1130'){currentUser={id:'admin',name:'관리자',role:'admin'};}
@@ -1169,7 +1170,6 @@ async function doLogin(){
   renderHome();
   renderCalendar();
   updateBadges();
-  document.getElementById('evtDate').value=new Date().toISOString().split('T')[0];
   startAutoRefresh();
 }
 
@@ -1333,10 +1333,6 @@ async function load(){
     applyParsed(json.record||{});
   }catch(e){
     console.warn('불러오기 실패',e);
-    // 실패해도 로그인은 계속 진행 (토스트만 표시)
-    if(document.getElementById('appRoot')?.style.display==='flex'){
-      toast('데이터 불러오기 실패. 네트워크를 확인해주세요.','error');
-    }
   }finally{
     showLoadingOverlay(false);
   }
@@ -1519,6 +1515,8 @@ function renderCalendar(){
 function changeMonth(d){state.calMonth+=d;if(state.calMonth>11){state.calMonth=0;state.calYear++;}if(state.calMonth<0){state.calMonth=11;state.calYear--;}renderCalendar();}
 function goToday(){state.calYear=new Date().getFullYear();state.calMonth=new Date().getMonth();renderCalendar();}
 function openAddEvent(date){
+  document.getElementById('evtEditId').value='';
+  document.getElementById('eventModalTitle').textContent='일정 추가';
   document.getElementById('evtDate').value=date;
   document.getElementById('evtEndDate').value=date;
   document.getElementById('evtTime').value='';
@@ -1545,26 +1543,37 @@ function submitEvent(){
   const endDate=document.getElementById('evtEndDate').value||date;
   const isAdmin=currentUser.role==='admin';
   const owner=isAdmin?document.getElementById('evtOwner').value:currentUser.name;
-  state.events.push({
-    id:Date.now(),title,date,
-    endDate: endDate>=date ? endDate : date,
+  const editId=document.getElementById('evtEditId').value;
+  const record={
+    id:editId?Number(editId):Date.now(),
+    title,date,
+    endDate:endDate>=date?endDate:date,
     time:document.getElementById('evtTime').value,
     endTime:document.getElementById('evtEndTime').value,
     type:document.getElementById('evtType').value,
     owner,
-    ownerId:currentUser.id,
+    ownerId:editId?(state.events.find(x=>x.id===Number(editId))?.ownerId||currentUser.id):currentUser.id,
     note:document.getElementById('evtNote').value
-  });
+  };
+  if(editId){
+    const idx=state.events.findIndex(x=>x.id===Number(editId));
+    if(idx!==-1)state.events[idx]=record;
+  } else {
+    state.events.push(record);
+  }
   save();closeModal('eventModal');
   ['evtTitle','evtDate','evtEndDate','evtTime','evtEndTime','evtOwner','evtNote'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  renderCalendar();toast('일정이 추가되었습니다','success');
+  document.getElementById('evtEditId').value='';
+  renderCalendar();toast(editId?'일정이 수정되었습니다':'일정이 추가되었습니다','success');
 }
+let _viewingEventId=null;
 function viewEvent(id){
   const e=state.events.find(x=>x.id===id);if(!e)return;
+  _viewingEventId=id;
   const isAdmin=currentUser.role==='admin';
   const isOwner=e.ownerId===currentUser.id||e.owner===currentUser.name;
   const canDelete=isAdmin||isOwner;
-  const typeLabel={blue:'🔵 회의',green:'🟢 행사',purple:'🟣 마감',warn:'🟡 휴가'};
+  const typeLabel={blue:'🔵 회의',green:'🟢 행사',purple:'🟣 마감',warn:'🟡 휴가',pink:'🩷 개인',gray:'⚪ 기타'};
   document.getElementById('evtDetailTitle').textContent=e.title;
   document.getElementById('evtDetailBody').innerHTML=`
     <div style="display:flex;flex-direction:column;gap:12px">
@@ -1577,6 +1586,21 @@ function viewEvent(id){
   del.style.display=canDelete?'inline-flex':'none';
   del.onclick=()=>{state.events=state.events.filter(x=>x.id!==id);save();closeModal('evtDetailModal');renderCalendar();toast('일정이 삭제되었습니다','info');};
   openModal('evtDetailModal');
+}
+function openEditEvent(){
+  const e=state.events.find(x=>x.id===_viewingEventId);if(!e)return;
+  closeModal('evtDetailModal');
+  document.getElementById('evtEditId').value=e.id;
+  document.getElementById('eventModalTitle').textContent='일정 수정';
+  document.getElementById('evtTitle').value=e.title;
+  document.getElementById('evtDate').value=e.date;
+  document.getElementById('evtEndDate').value=e.endDate||e.date;
+  document.getElementById('evtTime').value=e.time||'';
+  document.getElementById('evtEndTime').value=e.endTime||'';
+  document.getElementById('evtType').value=e.type||'blue';
+  if(document.getElementById('evtOwner')) document.getElementById('evtOwner').value=e.owner||'';
+  document.getElementById('evtNote').value=e.note||'';
+  openModal('eventModal');
 }
 
 // NOTICES
