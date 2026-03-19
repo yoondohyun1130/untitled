@@ -1146,7 +1146,44 @@ tr:hover td{background:rgba(26,26,26,0.7)}
 let currentUser=null;
 let loginMode='admin';
 
-// ── THEME ──
+// ── SESSION (3시간 자동 만료) ──
+const SESSION_KEY = 'portalSession';
+const SESSION_TTL = 3 * 60 * 60 * 1000; // 3시간
+let sessionExpireTimer = null;
+
+function saveSession(user){
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({user, expiresAt: Date.now() + SESSION_TTL}));
+}
+function clearSession(){
+  sessionStorage.removeItem(SESSION_KEY);
+  if(sessionExpireTimer){ clearTimeout(sessionExpireTimer); sessionExpireTimer=null; }
+}
+function startSessionExpireTimer(remainingMs){
+  if(sessionExpireTimer) clearTimeout(sessionExpireTimer);
+  sessionExpireTimer = setTimeout(()=>{
+    toast('세션이 만료되어 자동 로그아웃됩니다.','info');
+    setTimeout(doLogout, 1500);
+  }, remainingMs);
+}
+async function restoreSession(){
+  const raw = sessionStorage.getItem(SESSION_KEY);
+  if(!raw) return false;
+  try{
+    const {user, expiresAt} = JSON.parse(raw);
+    const remaining = expiresAt - Date.now();
+    if(remaining <= 0){ clearSession(); return false; }
+    try{ await load(); }catch(e){ console.warn('세션 복원 중 load 실패', e); }
+    currentUser = user;
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('loginScreen').classList.add('hidden');
+    const app=document.getElementById('appRoot');
+    app.style.display='flex';
+    app.classList.add('visible');
+    setupRoleUI(); renderHome(); renderCalendar(); updateBadges(); startAutoRefresh();
+    startSessionExpireTimer(remaining);
+    return true;
+  }catch(e){ clearSession(); return false; }
+}
 function toggleTheme(){
   const isLight=document.documentElement.classList.toggle('light');
   const thumb=document.getElementById('themeThumb');
@@ -1201,6 +1238,8 @@ async function doLogin(){
   renderHome();
   renderCalendar();
   updateBadges();
+  saveSession(currentUser);
+  startSessionExpireTimer(SESSION_TTL);
   startAutoRefresh();
 }
 
@@ -1252,6 +1291,7 @@ function doSignup(){
 
 function doLogout(){
   currentUser=null;
+  clearSession();
   stopAutoRefresh();
   const btn=document.getElementById('refreshBtn');
   if(btn)btn.textContent='↻ 새로고침';
@@ -2631,7 +2671,7 @@ async function refreshData(){
 
 // BOOT
 updateTopDate();
-load();
+restoreSession(); // 세션 복원 시도 (새로고침해도 3시간 내 로그인 유지)
 
 // 10분마다 자동 동기화
 const AUTO_REFRESH_INTERVAL = 10 * 60 * 1000; // 10분
