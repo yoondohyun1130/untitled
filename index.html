@@ -2016,7 +2016,15 @@ function renderMovies(){
         </div>
       </div>
       <div class="movie-reviews">
-        ${m.reviews.length?m.reviews.map(r=>{
+        <div style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface2)">
+          <span style="font-size:0.68rem;color:var(--text3)">리뷰 정렬</span>
+          <button class="ftab active" onclick="setReviewSort(${m.id},'newest',this)" id="rsort-newest-${m.id}" style="padding:3px 10px;font-size:0.72rem">최신순</button>
+          <button class="ftab" onclick="setReviewSort(${m.id},'oldest',this)" id="rsort-oldest-${m.id}" style="padding:3px 10px;font-size:0.72rem">오래된순</button>
+          <button class="ftab" onclick="setReviewSort(${m.id},'rating_high',this)" id="rsort-rating_high-${m.id}" style="padding:3px 10px;font-size:0.72rem">별점 높은순</button>
+          <button class="ftab" onclick="setReviewSort(${m.id},'rating_low',this)" id="rsort-rating_low-${m.id}" style="padding:3px 10px;font-size:0.72rem">별점 낮은순</button>
+        </div>
+        <div id="review-list-${m.id}">
+        ${m.reviews.length?[...m.reviews].sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(r=>{
           const canDelReview=currentUser.role==='admin'||r.authorId===currentUser.id;
           const col=colorFor(r.author);
           return `<div class="movie-review-item">
@@ -2034,6 +2042,7 @@ function renderMovies(){
             ${r.review?`<div class="review-body">${r.review}</div>`:''}
           </div>`;
         }).join(''):`<div style="padding:20px;text-align:center;font-size:0.8rem;color:var(--text3)">아직 리뷰가 없습니다</div>`}
+        </div>
       </div>
     </div>
     <div style="margin:-16px 0 20px;border:1px solid var(--border);border-top:1px dashed var(--border);border-radius:0 0 var(--radius) var(--radius);overflow:hidden">
@@ -2047,6 +2056,47 @@ function renderMovies(){
     btn.addEventListener('mouseover',()=>btn.style.background='rgba(232,255,71,0.07)');
     btn.addEventListener('mouseout', ()=>btn.style.background='rgba(232,255,71,0.03)');
   });
+}
+
+function setReviewSort(movieId, sortKey, btn){
+  // 버튼 active 상태 전환
+  ['newest','oldest','rating_high','rating_low'].forEach(k=>{
+    const b=document.getElementById(`rsort-${k}-${movieId}`);
+    if(b) b.classList.remove('active');
+  });
+  btn.classList.add('active');
+
+  const movie=state.movies.find(m=>m.id===movieId);
+  if(!movie) return;
+  const avatarColors=['#4da6ff','#4dffaa','#b894ff','#ffb84d','#ff5f5f','#e8ff47'];
+  const colorFor=name=>avatarColors[Math.abs([...name].reduce((h,c)=>h*31+c.charCodeAt(0),0))%avatarColors.length];
+
+  let reviews=[...movie.reviews];
+  if(sortKey==='newest') reviews.sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+  else if(sortKey==='oldest') reviews.sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id);
+  else if(sortKey==='rating_high') reviews.sort((a,b)=>b.rating-a.rating||b.date.localeCompare(a.date));
+  else if(sortKey==='rating_low') reviews.sort((a,b)=>a.rating-b.rating||b.date.localeCompare(a.date));
+
+  const container=document.getElementById(`review-list-${movieId}`);
+  if(!container) return;
+  container.innerHTML=reviews.length?reviews.map(r=>{
+    const canDelReview=currentUser.role==='admin'||r.authorId===currentUser.id;
+    const col=colorFor(r.author);
+    return `<div class="movie-review-item">
+      <div class="review-header">
+        <div class="review-avatar" style="background:${col}18;color:${col};border:1.5px solid ${col}44">${r.author[0]}</div>
+        <div class="review-author">${r.author}</div>
+        <div class="review-stars">${renderStars(r.rating)}</div>
+        <div style="font-size:0.72rem;color:var(--text3)">${r.rating}점</div>
+        ${r.watchedDate?`<div class="review-date">👁️ ${r.watchedDate}</div>`:''}
+        <div class="review-date">${r.date}</div>
+        ${canDelReview?`<button class="btn btn-xs" style="background:var(--surface2);border:1px solid var(--border);color:var(--text)" onclick="openEditReview(${movie.id},${r.id})">수정</button>`:''}
+        ${canDelReview?`<button class="btn btn-danger btn-xs" onclick="deleteReview(${movie.id},${r.id})">삭제</button>`:''}
+      </div>
+      <div class="review-summary">"${r.summary}"</div>
+      ${r.review?`<div class="review-body">${r.review}</div>`:''}
+    </div>`;
+  }).join(''):`<div style="padding:20px;text-align:center;font-size:0.8rem;color:var(--text3)">아직 리뷰가 없습니다</div>`;
 }
 
 function submitMovie(){
